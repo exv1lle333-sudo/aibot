@@ -5,6 +5,7 @@
 """
 import time
 import secrets
+import uuid
 import aiosqlite
 
 from config import cfg
@@ -290,13 +291,48 @@ async def spend_wallet(user_id: int, model_key: str, amount: float) -> bool:
 # ---------- transactions ----------
 
 async def create_transaction(user_id: int, amount_rub: float, method: int | None) -> str:
-    tx_id = secrets.token_hex(16)
+    # ВАЖНО: этот tx_id отправляется в Platega как поле "id" транзакции (см. platega.py
+    # create_payment) — Platega требует именно UUID-формат для этого поля, а не
+    # произвольную hex-строку. Раньше здесь был secrets.token_hex(16) (32 hex-символа без
+    # дефисов) — Platega такой id могла принять, но при обратном отклике (webhook и
+    # ответ /transaction/{id}) присылает ЕГО ЖЕ обратно, и это тот же самый id, что и в
+    # нашей таблице transactions, так что искать транзакцию по нему можно без проблем.
+    # UUID менять не обязательно с точки зрения нашей БД — но так формат совпадает с тем,
+    # что ожидает Platega, и с примерами в их документации.
+    tx_id = str(uuid.uuid4())
     await db().execute(
         "INSERT INTO transactions (id, user_id, amount_rub, status, method, created_at) VALUES (?, ?, ?, 'pending', ?, ?)",
         (tx_id, user_id, amount_rub, method, int(time.time())),
     )
     await db().commit()
     return tx_id
+
+
+async def mark_transaction_failed(tx_id: str) -> dict | None:
+    cur = await db().execute("SELECT * FROM transactions WHERE id=?", (tx_id,))
+    row = await cur.fetchone()
+    if not row:
+        return None
+    tx = dict(zip([c[0] for c in cur.description], row))
+    if tx["status"] in ("paid", "failed"):
+        return tx  # уже обработано (оплачено или уже помечено неуспешным) — не трогаем
+    await db().execute("UPDATE transactions SET status='failed' WHERE id=?", (tx_id,))
+    await db().commit()
+    tx["status"] = "failed"
+    return tx
+
+
+async def pending_transactions(max_age_seconds: int) -> list[dict]:
+    """Транзакции со статусом pending не старше max_age_seconds — используется фоновой
+    сверкой (reconciliation) на случай, если webhook от Platega не дошёл до нашего сервера
+    (например, из-за проблем с проброской портов/DNS на домашнем сервере)."""
+    min_created_at = int(time.time()) - max_age_seconds
+    cur = await db().execute(
+        "SELECT * FROM transactions WHERE status='pending' AND created_at>=?", (min_created_at,)
+    )
+    rows = await cur.fetchall()
+    cols = [c[0] for c in cur.description]
+    return [dict(zip(cols, r)) for r in rows]
 
 
 async def mark_transaction_paid(tx_id: str) -> dict | None:

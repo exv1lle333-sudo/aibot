@@ -1,16 +1,23 @@
 """
 Интеграция с Platega (https://platega.io).
 
-ВАЖНО: перед продакшеном сверь названия заголовков авторизации и точный формат
-подписи webhook с личным кабинетом Platega — их точная менеджер-документация
-(wiki.platega.io) закрыта для автоматического доступа, поэтому здесь используется
-конфигурация по общедокументированной схеме:
-  - создание платежа: POST {base_url}/transaction/process (или /v2/transaction/process)
-  - заголовки: X-MerchantId, X-Secret
-  - webhook: подпись HMAC-SHA256 в заголовке X-Signature, сверяется по PLATEGA_SECRET
-
-Если твой менеджер Platega выдаст другие названия заголовков — поменяй их
-в PLATEGA_HEADER_MERCHANT / PLATEGA_HEADER_SECRET ниже или сразу в .env.
+Сверено с официальной документацией (platega-io.gitbook.io/platega.io-api-dokumentaciya,
+02.09.2026):
+  - создание платежа: POST {base_url}/transaction/process
+  - заголовки (и для создания платежа, и в самом webhook-колбэке): X-MerchantId, X-Secret
+  - НИКАКОЙ отдельной HMAC-подписи (X-Signature) Platega не присылает — колбэк
+    аутентифицируется теми же X-MerchantId/X-Secret, что и создание платежа (это видно и
+    по официальному примеру callback'а). verify_webhook_signature() ниже оставлена только
+    как задел на случай, если Platega когда-нибудь добавит подпись, и в webhook.py сейчас
+    не используется.
+  - тело запроса на создание платежа: поле называется "id" (UUID, его же генерируем сами
+    и используем как tx_id в нашей БД — так же и колбэк потом присылает обратно именно
+    этот id), и "return" (НЕ "returnUrl" — это была ошибка, из-за которой Platega могла
+    просто игнорировать редирект). Поля "merchantTransactionId" в их API нет вообще —
+    раньше оно отправлялось, но Platega его не читает, поэтому убрано.
+  - статус после успешной оплаты в колбэке — "CONFIRMED" (не "PAID"), при неуспехе —
+    "CANCELED"
+  - проверка статуса (для сверки, если колбэк не дошёл): GET {base_url}/transaction/{id}
 """
 import hashlib
 import hmac
@@ -48,14 +55,19 @@ async def create_payment(amount_rub: float, tx_id: str, description: str) -> str
     endpoint = "/v2/transaction/process" if cfg.platega_api_version == "v2" else "/transaction/process"
     payload = {
         "paymentMethod": cfg.platega_active_methods[0] if cfg.platega_active_methods else 2,
-        "id": str(uuid.uuid4()),
+        # КЛЮЧЕВОЙ МОМЕНТ: сюда идёт именно tx_id из нашей БД (не случайный новый uuid4()),
+        # потому что Platega вернёт этот же "id" и в ответе на создание, и в webhook-колбэке,
+        # и в GET /transaction/{id}. Если бы здесь генерировался отдельный случайный id (как
+        # было раньше), то по колбэку было бы невозможно найти транзакцию в базе — платёж
+        # приходил бы, но баланс никогда не зачислялся.
+        "id": tx_id,
         "paymentDetails": {
             "amount": round(amount_rub, 2),
             "currency": "RUB",
         },
         "description": description,
-        "merchantTransactionId": tx_id,
-        "returnUrl": cfg.platega_return_url or None,
+        # именно "return", а не "returnUrl" — так называется поле в API Platega
+        "return": cfg.platega_return_url or None,
         "failedUrl": cfg.platega_failed_url or None,
     }
     headers = {
@@ -100,3 +112,30 @@ def verify_webhook_signature(raw_body: bytes, signature: str) -> bool:
         return False
     computed = hmac.new(cfg.platega_secret.encode(), raw_body, hashlib.sha256).hexdigest()
     return hmac.compare_digest(computed, signature or "")
+
+
+async def get_transaction_status(tx_id: str) -> dict | None:
+    """GET /transaction/{id} — статус конкретного платежа в Platega.
+
+    Используется фоновой сверкой (см. webhook.py: reconcile_pending_transactions) на
+    случай, если сам webhook-колбэк не дошёл до нашего сервера — например, если домен
+    ещё не до конца настроен (DNS/порт-форвардинг/HTTPS) или Platega не смогла достучаться
+    с первых 3 попыток. Возвращает None, если Platega ответила ошибкой или транзакция не
+    найдена — вызывающий код должен считать это временной проблемой, а не финалом.
+    """
+    if not cfg.platega_merchant_id or not cfg.platega_secret:
+        return None
+    headers = {
+        HEADER_MERCHANT: cfg.platega_merchant_id,
+        HEADER_SECRET: cfg.platega_secret,
+    }
+    try:
+        async with httpx.AsyncClient(base_url=cfg.platega_base_url, timeout=15) as client:
+            resp = await client.get(f"/transaction/{tx_id}", headers=headers)
+    except httpx.RequestError as e:
+        log.warning("Platega: не удалось проверить статус транзакции %s: %s", tx_id, e)
+        return None
+    if resp.status_code >= 400:
+        log.warning("Platega: GET /transaction/%s вернул %s: %s", tx_id, resp.status_code, resp.text[:500])
+        return None
+    return resp.json()

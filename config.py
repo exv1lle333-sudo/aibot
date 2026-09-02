@@ -46,17 +46,8 @@ class Config:
     webhook_path: str = os.getenv("PLATEGA_WEBHOOK_PATH", "/platega-webhook")
     public_base_url: str = os.getenv("PUBLIC_BASE_URL", "")  # напр. https://hooks.example.com
 
-    # --- Telegram Mini App (веб-версия меню бота) ---
-    # Полный публичный адрес мини-аппа, например https://exvl.ru/app/ — именно его нужно
-    # прописать в @BotFather (Bot Settings -> Menu Button, или /newapp) и сюда же смотрит
-    # кнопка "🖥 Мини-апп" в главном меню бота. ОБЯЗАТЕЛЬНО https (Telegram другого не примет).
-    miniapp_url: str = os.getenv("MINIAPP_URL", "")
-    # Путь на диске к статике мини-аппа (index.html/app.js/style.css) — раздаётся тем же
-    # aiohttp-сервером, что и вебхук Platega, на префиксе /app/.
-    miniapp_static_dir: str = os.getenv("MINIAPP_STATIC_DIR", "./webapp_static")
-
     # --- Бизнес-правила ---
-    min_topup_rub: int = _int("MIN_TOPUP_RUB", 50)
+    min_topup_rub: int = _int("MIN_TOPUP_RUB", 10)
     referral_free_requests: int = _int("REFERRAL_FREE_REQUESTS", 7)
     referral_commission_percent: float = float(os.getenv("REFERRAL_COMMISSION_PERCENT", "5"))
     signup_bonus_tokens: int = _int("SIGNUP_BONUS_TOKENS", 5000)  # бонус выдаётся на Gemini 3.1 Flash Lite

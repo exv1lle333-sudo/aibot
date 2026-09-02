@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from aiogram.types import InlineKeyboardMarkup, ReplyKeyboardMarkup, WebAppInfo
+from aiogram.types import InlineKeyboardMarkup, ReplyKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 
 import pricing
@@ -24,15 +24,9 @@ MAIN_BTN_MODE = "⚙️ Режим"
 CHAT_BTN_CLEAR = "🧹 Очистить диалог"
 CHAT_BTN_BACK = "⬅️ В главное меню"
 
-MAIN_BTN_MINIAPP = "🖥 Мини-апп"
-
 
 def main_reply_kb(is_admin: bool = False) -> ReplyKeyboardMarkup:
     b = ReplyKeyboardBuilder()
-    has_miniapp = bool(cfg.miniapp_url)
-    if has_miniapp:
-        # web_app-кнопка обязательно должна вести на https — иначе Telegram её не покажет/не откроет
-        b.button(text=MAIN_BTN_MINIAPP, web_app=WebAppInfo(url=cfg.miniapp_url))
     b.button(text=MAIN_BTN_CHAT)
     b.button(text=MAIN_BTN_PURCHASE)
     b.button(text=MAIN_BTN_PROFILE)
@@ -42,7 +36,7 @@ def main_reply_kb(is_admin: bool = False) -> ReplyKeyboardMarkup:
     b.button(text=MAIN_BTN_REFERRAL)
     b.button(text=MAIN_BTN_CHANNEL)
     b.button(text=MAIN_BTN_MODE)
-    sizes = [1, 2, 2, 2, 2, 1] if has_miniapp else [2, 2, 2, 2, 1]
+    sizes = [2, 2, 2, 2, 1]
     if is_admin:
         b.button(text=MAIN_BTN_ADMIN)
         sizes.append(1)

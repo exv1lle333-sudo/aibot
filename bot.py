@@ -9,7 +9,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import BotCommand, MenuButtonWebApp, MenuButtonDefault, WebAppInfo
+from aiogram.types import BotCommand, MenuButtonDefault
 
 from database import db
 from config import cfg
@@ -108,16 +108,7 @@ async def main():
 
     await bot.set_my_commands(BOT_COMMANDS)
 
-    # Синяя кнопка слева от поля ввода в Telegram: открывает мини-апп в один тап.
-    # Требует https в MINIAPP_URL — иначе Telegram откажется её показать, и мы
-    # оставляем обычную кнопку меню, чтобы бот не падал из-за незаполненного .env.
-    if cfg.miniapp_url:
-        try:
-            await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(text="Мини-апп", web_app=WebAppInfo(url=cfg.miniapp_url)))
-        except Exception:
-            log.exception("failed to set webapp menu button (проверь, что MINIAPP_URL начинается с https://)")
-    else:
-        await bot.set_chat_menu_button(menu_button=MenuButtonDefault())
+    await bot.set_chat_menu_button(menu_button=MenuButtonDefault())
 
     # порядок важен: admin раньше user, чтобы /admin и колбэки admin:* обрабатывались в первую очередь
     dp.include_router(admin_handlers.router)
