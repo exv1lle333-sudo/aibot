@@ -6,7 +6,6 @@
 Открой в кабинете Platega webhook на:  {PUBLIC_BASE_URL}{PLATEGA_WEBHOOK_PATH}
 (например: https://hooks.example.com/platega-webhook)
 """
-import hashlib
 import hmac
 import logging
 
@@ -27,25 +26,31 @@ def create_app(bot: Bot) -> web.Application:
 
     async def handle_platega(request: web.Request) -> web.Response:
         raw = await request.read()
-        signature = request.headers.get(platega.SIGNATURE_HEADER, "")
 
-        if cfg.platega_secret and not platega.verify_webhook_signature(raw, signature):
-            # Подробный лог для диагностики: показывает, что реально пришло от Platega
-            # и что бот посчитал сам — так видно, в чём именно расхождение (не тот секрет,
-            # не то поле с подписью, другой формат хэша и т.д.)
-            expected = hmac.new(cfg.platega_secret.encode(), raw, hashlib.sha256).hexdigest()
+        # ВАЖНО: реальные вебхуки от Platega (проверено по логам) НЕ содержат HMAC-подписи
+        # в отдельном заголовке — вместо этого они повторно присылают те же X-MerchantId/
+        # X-Secret, что и при создании платежа. Поэтому проверяем именно их, а не подпись.
+        got_merchant = request.headers.get(platega.HEADER_MERCHANT, "")
+        got_secret = request.headers.get(platega.HEADER_SECRET, "")
+        auth_ok = (
+            bool(cfg.platega_merchant_id)
+            and bool(cfg.platega_secret)
+            and hmac.compare_digest(got_merchant, cfg.platega_merchant_id)
+            and hmac.compare_digest(got_secret, cfg.platega_secret)
+        )
+
+        if not auth_ok:
             log.warning(
-                "Platega webhook: bad signature. "
-                "Ожидаемый заголовок подписи: '%s'. Все заголовки запроса: %s. "
-                "Тело запроса (raw): %s. "
-                "Полученная подпись: '%s'. Посчитанная ботом подпись (hex-sha256): '%s'.",
-                platega.SIGNATURE_HEADER,
+                "Platega webhook: неверные учётные данные. "
+                "Получено %s='%s', %s='***%s' (последние 4 симв.). Ожидался merchant_id='%s'. "
+                "Все заголовки запроса: %s. Тело запроса (raw): %s.",
+                platega.HEADER_MERCHANT, got_merchant,
+                platega.HEADER_SECRET, got_secret[-4:] if got_secret else "",
+                cfg.platega_merchant_id,
                 dict(request.headers),
                 raw.decode(errors="replace")[:2000],
-                signature,
-                expected,
             )
-            return web.json_response({"ok": False, "error": "bad signature"}, status=403)
+            return web.json_response({"ok": False, "error": "unauthorized"}, status=403)
 
         data = await request.json()
         status = str(data.get("status", "")).upper()
