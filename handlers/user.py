@@ -1020,6 +1020,20 @@ _LATEX_SYMBOL_RE = re.compile(
     r"\\(" + "|".join(re.escape(k) for k in sorted(_LATEX_SYMBOLS, key=len, reverse=True)) + r")(?![a-zA-Z])"
 )
 
+# Языки, при которых код внутри ```lang ... ``` — реальный программный код (а не
+# формула/расчёт), и трогать его LaTeX-страховкой нельзя: обратные слэши, `_`, `{}`
+# там значимы (регулярки, f-строки, словари и т.п.). Если тег языка не входит в этот
+# список (включая пустой тег — модель просто дала блок без языка под формулу, как
+# просит SYSTEM_PROMPT) — считаем блок формулой/расчётом и прогоняем через _delatex,
+# на случай если модель всё же оставила в нём LaTeX-мусор.
+_PROGRAMMING_FENCE_LANGS = {
+    "python", "py", "py3", "js", "javascript", "jsx", "ts", "typescript", "tsx",
+    "java", "c", "cpp", "c++", "csharp", "cs", "go", "golang", "rust", "rs",
+    "php", "ruby", "rb", "swift", "kotlin", "kt", "sql", "bash", "sh", "shell",
+    "zsh", "powershell", "html", "css", "json", "yaml", "yml", "xml", "toml",
+    "ini", "r", "matlab", "perl", "lua", "scala", "dart", "dockerfile", "makefile",
+}
+
 
 def _delatex(text: str) -> str:
     """Превращает частый LaTeX в читаемый обычный текст (см. комментарий выше)."""
@@ -1059,7 +1073,13 @@ def _format_for_telegram(text: str) -> str:
     fences: list[str] = []
 
     def _stash_fence(m: re.Match) -> str:
-        code = _html_escape(m.group(2))
+        lang = (m.group(1) or "").strip().lower()
+        content = m.group(2)
+        if lang not in _PROGRAMMING_FENCE_LANGS:
+            # Скорее всего формула/расчёт (или блок вообще без языка) — подчищаем
+            # возможный LaTeX-мусор так же, как и в обычном тексте.
+            content = _delatex(content)
+        code = _html_escape(content)
         fences.append(f"<pre>{code}</pre>")
         return f"\x00FENCE{len(fences) - 1}\x00"
 

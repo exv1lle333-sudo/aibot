@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 import asyncio
 import logging
+import os
+import sys
 from logging.handlers import RotatingFileHandler
 
 from aiogram import Bot, Dispatcher
@@ -39,10 +41,56 @@ BOT_COMMANDS = [
     BotCommand(command="new_chat", description="Очистить историю диалога с ИИ"),
 ]
 
+# ---------------------------------------------------------------------------
+# Защита от повторного запуска. Без неё, если бота случайно запустить второй раз
+# на этой же машине (например, забыли проверить, что предыдущий процесс ещё жив,
+# при деплое через nohup/screen) — оба процесса начинают одновременно опрашивать
+# Telegram (getUpdates) с одним и тем же BOT_TOKEN и параллельно писать в одну и
+# ту же SQLite-базу. Внешне это выглядит как "бот глючит": сообщения дублируются,
+# часть ответов теряется, а в логах — ничего явного, что объяснило бы причину.
+# Держим файловый лок (fcntl.flock) рядом с bot.py: второй процесс сразу видит,
+# что лок занят, и завершается с понятным сообщением вместо того, чтобы тихо
+# конфликтовать с первым.
+# ---------------------------------------------------------------------------
+_LOCK_FILE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot.lock")
+_lock_file_handle = None  # держим файл открытым на всё время жизни процесса — иначе лок снимется
+
+
+def _acquire_single_instance_lock() -> None:
+    global _lock_file_handle
+    _lock_file_handle = open(_LOCK_FILE_PATH, "w")
+    try:
+        import fcntl
+    except ImportError:
+        # fcntl есть только на POSIX (Linux/macOS), на которых и живёт боевой сервер (см.
+        # README.md/DEPLOY_MINIAPP.md — деплой через venv+nginx на Linux). Если кто-то всё же
+        # запускает бота локально на Windows для разработки — не роняем его из-за отсутствия
+        # fcntl, просто пропускаем проверку с предупреждением в лог.
+        log.warning("Защита от повторного запуска недоступна на этой ОС (нет модуля fcntl) — пропускаем.")
+        return
+    try:
+        fcntl.flock(_lock_file_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        log.error(
+            "❌ Бот уже запущен другим процессом (лок-файл %s занят) — второй экземпляр НЕ "
+            "поднимаем, иначе оба процесса начнут одновременно опрашивать Telegram и писать в "
+            "одну базу. Если ты точно знаешь, что старый процесс уже не работает (например, он "
+            "упал аварийно и не снял лок) — останови все процессы бота (`pkill -f bot.py`) и "
+            "попробуй запустить снова.",
+            _LOCK_FILE_PATH,
+        )
+        sys.exit(1)
+    _lock_file_handle.seek(0)
+    _lock_file_handle.truncate()
+    _lock_file_handle.write(str(os.getpid()))
+    _lock_file_handle.flush()
+
 
 async def main():
     if not cfg.bot_token:
         raise RuntimeError("BOT_TOKEN не задан в .env")
+
+    _acquire_single_instance_lock()
 
     placeholder_models = pricing.has_placeholder_prices()
     if placeholder_models:
