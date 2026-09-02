@@ -6,6 +6,8 @@
 Открой в кабинете Platega webhook на:  {PUBLIC_BASE_URL}{PLATEGA_WEBHOOK_PATH}
 (например: https://hooks.example.com/platega-webhook)
 """
+import hashlib
+import hmac
 import logging
 
 from aiohttp import web
@@ -28,7 +30,21 @@ def create_app(bot: Bot) -> web.Application:
         signature = request.headers.get(platega.SIGNATURE_HEADER, "")
 
         if cfg.platega_secret and not platega.verify_webhook_signature(raw, signature):
-            log.warning("Platega webhook: bad signature")
+            # Подробный лог для диагностики: показывает, что реально пришло от Platega
+            # и что бот посчитал сам — так видно, в чём именно расхождение (не тот секрет,
+            # не то поле с подписью, другой формат хэша и т.д.)
+            expected = hmac.new(cfg.platega_secret.encode(), raw, hashlib.sha256).hexdigest()
+            log.warning(
+                "Platega webhook: bad signature. "
+                "Ожидаемый заголовок подписи: '%s'. Все заголовки запроса: %s. "
+                "Тело запроса (raw): %s. "
+                "Полученная подпись: '%s'. Посчитанная ботом подпись (hex-sha256): '%s'.",
+                platega.SIGNATURE_HEADER,
+                dict(request.headers),
+                raw.decode(errors="replace")[:2000],
+                signature,
+                expected,
+            )
             return web.json_response({"ok": False, "error": "bad signature"}, status=403)
 
         data = await request.json()
