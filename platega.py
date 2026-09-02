@@ -84,8 +84,10 @@ async def create_payment(amount_rub: float, tx_id: str, description: str) -> str
 
     data = resp.json()
 
-    # у Platega ссылка на оплату обычно приходит в поле "redirectUrl" / "paymentUrl" / "url"
-    url = data.get("redirectUrl") or data.get("paymentUrl") or data.get("url") or ""
+    # у Platega ссылка на оплату приходит в поле "redirect" (проверено по реальному ответу
+    # твоего аккаунта), но на всякий случай проверяем и другие варианты названия поля,
+    # которые встречаются в разных версиях их API
+    url = data.get("redirect") or data.get("redirectUrl") or data.get("paymentUrl") or data.get("url") or ""
     if not url:
         log.error("Platega вернула 200, но без ссылки на оплату. Тело ответа: %s", data)
         raise PlategaError(f"Platega не вернула ссылку на оплату. Ответ: {data}")
