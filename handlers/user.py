@@ -94,13 +94,13 @@ async def cmd_new_chat(message: Message, state: FSMContext):
     data = await state.get_data()
     model_key = data.get("model_key")
     if await state.get_state() != ChatFlow.in_chat.state or not model_key:
-        await message.answer("💬 Сейчас нет активного диалога с моделью. Сначала выбери модель — «💬 Начать чат».")
+        await message.answer("💬 Сейчас нет активного диалога с моделью. Сначала выбери модель — «🤖 Модели».")
         return
     m = pricing.MODELS.get(model_key)
     if m is None:
         await state.clear()
         await message.answer(
-            "⚠️ Эта модель больше недоступна в боте. Выбери другую в «💬 Начать чат».",
+            "⚠️ Эта модель больше недоступна в боте. Выбери другую в «🤖 Модели».",
             reply_markup=kb.main_reply_kb(is_admin=message.from_user.id in cfg.admin_ids),
         )
         return
@@ -114,49 +114,33 @@ async def cmd_new_chat(message: Message, state: FSMContext):
 # поэтому нажатие любой из них всегда прерывает текущий сценарий (ввод суммы,
 # промокода, диалог с моделью и т.п.) и ведёт в соответствующий раздел.
 
-@router.message(F.text == kb.MAIN_BTN_PROFILE)
-async def on_btn_profile(message: Message, state: FSMContext):
-    await state.clear()
-    user = await db.get_or_create_user(message.from_user.id, message.from_user.username)
+async def _cabinet_text(user_id: int, username: str | None) -> str:
+    user = await db.get_or_create_user(user_id, username)
     lines = []
     for key, m in pricing.MODELS.items():
-        remaining = await db.get_wallet(message.from_user.id, key)
-        unit = "токенов"
-        lines.append(f"• {m.title}: {remaining:.0f} {unit}")
-    text = texts.PROFILE_TMPL.format(
+        remaining = await db.get_wallet(user_id, key)
+        lines.append(f"• {m.title}: {remaining:.0f} токенов")
+    return texts.CABINET_TMPL.format(
         user_id=user["user_id"],
         username=user["username"] or "—",
         balance=user["balance_rub"],
+        min_topup=cfg.min_topup_rub,
         free_requests=user["free_requests"],
         wallets="\n".join(lines),
     )
-    await message.answer(text)
 
 
-@router.message(F.text == kb.MAIN_BTN_BALANCE)
-async def on_btn_balance(message: Message, state: FSMContext):
+@router.message(F.text == kb.MAIN_BTN_CABINET)
+async def on_btn_cabinet(message: Message, state: FSMContext):
     await state.clear()
-    user = await db.get_or_create_user(message.from_user.id, message.from_user.username)
-    text = texts.BALANCE_MENU.format(balance=user["balance_rub"], min_topup=cfg.min_topup_rub)
-    await message.answer(text, reply_markup=kb.balance_menu())
+    text = await _cabinet_text(message.from_user.id, message.from_user.username)
+    await message.answer(text, reply_markup=kb.cabinet_menu())
 
 
-@router.message(F.text == kb.MAIN_BTN_CHAT)
-async def on_btn_start_chat(message: Message, state: FSMContext):
+@router.message(F.text == kb.MAIN_BTN_MODELS)
+async def on_btn_models(message: Message, state: FSMContext):
     await state.clear()
-    await message.answer(texts.CHAT_START_CATEGORY_MENU, reply_markup=kb.categories_kb("chat"))
-
-
-@router.message(F.text == kb.MAIN_BTN_PURCHASE)
-async def on_btn_purchase(message: Message, state: FSMContext):
-    await state.clear()
-    await message.answer(texts.MODELS_CATEGORY_MENU, reply_markup=kb.categories_kb("buy"))
-
-
-@router.message(F.text == kb.MAIN_BTN_PROMO)
-async def on_btn_promo(message: Message, state: FSMContext):
-    await state.set_state(Promo.waiting_code)
-    await message.answer(texts.PROMO_ENTER_CODE)
+    await message.answer(texts.MODELS_CATEGORY_MENU, reply_markup=kb.categories_kb())
 
 
 @router.message(F.text == kb.MAIN_BTN_SUPPORT)
@@ -186,14 +170,15 @@ async def on_btn_channel(message: Message, state: FSMContext):
 MODE_TITLES = {"normal": "💬 Обычный", "economy": "⚡ Экономный"}
 
 
-@router.message(F.text == kb.MAIN_BTN_MODE)
-async def on_btn_mode(message: Message, state: FSMContext):
+@router.callback_query(F.data == "menu:mode")
+async def cb_mode_menu(call: CallbackQuery, state: FSMContext):
     await state.clear()
-    mode = await db.get_chat_mode(message.from_user.id)
-    await message.answer(
+    mode = await db.get_chat_mode(call.from_user.id)
+    await call.message.edit_text(
         texts.MODE_MENU_TMPL.format(mode_title=MODE_TITLES.get(mode, mode)),
         reply_markup=kb.mode_kb(mode),
     )
+    await call.answer()
 
 
 @router.callback_query(F.data.startswith("mode:set:"))
@@ -218,34 +203,12 @@ async def on_btn_admin(message: Message, state: FSMContext):
     await message.answer(texts.ADMIN_MENU, reply_markup=kb.admin_menu())
 
 
-# ---------------- profile ----------------
+# ---------------- cabinet (профиль + баланс, объединено в один экран) ----------------
 
-@router.callback_query(F.data == "menu:profile")
-async def cb_profile(call: CallbackQuery):
-    user = await db.get_or_create_user(call.from_user.id, call.from_user.username)
-    lines = []
-    for key, m in pricing.MODELS.items():
-        remaining = await db.get_wallet(call.from_user.id, key)
-        unit = "токенов"
-        lines.append(f"• {m.title}: {remaining:.0f} {unit}")
-    text = texts.PROFILE_TMPL.format(
-        user_id=user["user_id"],
-        username=user["username"] or "—",
-        balance=user["balance_rub"],
-        free_requests=user["free_requests"],
-        wallets="\n".join(lines),
-    )
-    await call.message.edit_text(text, reply_markup=kb.back_to_main())
-    await call.answer()
-
-
-# ---------------- balance / topup ----------------
-
-@router.callback_query(F.data == "menu:balance")
-async def cb_balance(call: CallbackQuery):
-    user = await db.get_or_create_user(call.from_user.id, call.from_user.username)
-    text = texts.BALANCE_MENU.format(balance=user["balance_rub"], min_topup=cfg.min_topup_rub)
-    await call.message.edit_text(text, reply_markup=kb.balance_menu())
+@router.callback_query(F.data == "menu:cabinet")
+async def cb_cabinet(call: CallbackQuery):
+    text = await _cabinet_text(call.from_user.id, call.from_user.username)
+    await call.message.edit_text(text, reply_markup=kb.cabinet_menu())
     await call.answer()
 
 
@@ -295,35 +258,32 @@ async def cb_balance_history(call: CallbackQuery):
             status = {"paid": "✅ оплачено", "pending": "⏳ ожидание", "failed": "❌ ошибка"}.get(tx["status"], tx["status"])
             lines.append(f"{tx['amount_rub']:.2f} ₽ — {status}")
         text = "📜 <b>Последние платежи:</b>\n\n" + "\n".join(lines)
-    await call.message.edit_text(text, reply_markup=kb.balance_menu())
+    await call.message.edit_text(text, reply_markup=kb.cabinet_menu())
     await call.answer()
 
 
-# ---------------- purchase menu / models / buy ----------------
+# ---------------- models: категория → модель → карточка (чат + покупка вместе) ----------------
 
 @router.callback_query(F.data.startswith("models_cat:"))
 async def cb_models_category(call: CallbackQuery):
-    _, mode, category = call.data.split(":", 2)
-    text = texts.MODELS_MENU if mode == "buy" else texts.CHAT_START_MODELS_MENU
-    await call.message.edit_text(text, reply_markup=kb.models_in_category_kb(mode, category))
+    category = call.data.split(":", 1)[1]
+    await call.message.edit_text(texts.MODELS_MENU, reply_markup=kb.models_in_category_kb(category))
     await call.answer()
 
 
-@router.callback_query(F.data.startswith("models_list:"))
-async def cb_models_list(call: CallbackQuery):
-    mode = call.data.split(":", 1)[1]
-    text = texts.MODELS_CATEGORY_MENU if mode == "buy" else texts.CHAT_START_CATEGORY_MENU
-    await call.message.edit_text(text, reply_markup=kb.categories_kb(mode))
+@router.callback_query(F.data == "models:categories")
+async def cb_models_categories(call: CallbackQuery):
+    await call.message.edit_text(texts.MODELS_CATEGORY_MENU, reply_markup=kb.categories_kb())
     await call.answer()
 
 
 @router.callback_query(F.data.startswith("model:"))
 async def cb_model_card(call: CallbackQuery):
-    _, mode, model_key = call.data.split(":", 2)
+    model_key = call.data.split(":", 1)[1]
     m = pricing.MODELS.get(model_key)
     if m is None:
         await call.answer("Эта модель больше недоступна.", show_alert=True)
-        await call.message.edit_text(texts.MODELS_CATEGORY_MENU, reply_markup=kb.categories_kb(mode))
+        await call.message.edit_text(texts.MODELS_CATEGORY_MENU, reply_markup=kb.categories_kb())
         return
     price_per_unit = f"{m.sell_rub_per_1m:.0f} ₽ за 1 000 000 токенов"
     if m.kind == "image":
@@ -333,7 +293,7 @@ async def cb_model_card(call: CallbackQuery):
             f"(зависит от размера картинки) — это примерно {gen_price} ₽ за 1 картинку."
         ).replace(",", " ")
     text = texts.MODEL_CARD_TMPL.format(title=m.title, description=m.description, price_per_unit=price_per_unit)
-    await call.message.edit_text(text, reply_markup=kb.model_card_kb(model_key, mode))
+    await call.message.edit_text(text, reply_markup=kb.model_card_kb(model_key))
     await call.answer()
 
 
@@ -343,7 +303,7 @@ async def cb_buy_package(call: CallbackQuery):
     m = pricing.MODELS.get(model_key)
     if m is None:
         await call.answer("Эта модель больше недоступна.", show_alert=True)
-        await call.message.edit_text(texts.MODELS_CATEGORY_MENU, reply_markup=kb.categories_kb("buy"))
+        await call.message.edit_text(texts.MODELS_CATEGORY_MENU, reply_markup=kb.categories_kb())
         return
     amount = int(amount_s)
     price = pricing.package_price(model_key, amount)
@@ -362,7 +322,7 @@ async def cb_buy_package(call: CallbackQuery):
     unit = "токенов"
     await call.message.edit_text(
         texts.PACKAGE_BOUGHT_TEXT.format(amount=amount, unit=unit, title=m.title, price=price),
-        reply_markup=kb.model_card_kb(model_key, "buy"),
+        reply_markup=kb.model_card_kb(model_key),
     )
     await call.answer("Готово!")
 
@@ -384,7 +344,7 @@ async def cb_buy_package(call: CallbackQuery):
 @router.callback_query(F.data == "menu:promo")
 async def cb_promo_start(call: CallbackQuery, state: FSMContext):
     await state.set_state(Promo.waiting_code)
-    await call.message.edit_text(texts.PROMO_ENTER_CODE, reply_markup=kb.back_to_main())
+    await call.message.edit_text(texts.PROMO_ENTER_CODE, reply_markup=kb.cabinet_menu())
     await call.answer()
 
 
@@ -393,7 +353,7 @@ async def on_promo_code(message: Message, state: FSMContext):
     await state.clear()
     ok, msg = await db.redeem_promo(message.text.strip(), message.from_user.id)
     text = texts.PROMO_APPLIED_OK.format(msg=msg) if ok else texts.PROMO_APPLIED_FAIL.format(msg=msg)
-    await message.answer(text, reply_markup=kb.back_to_main())
+    await message.answer(text, reply_markup=kb.cabinet_menu())
 
 
 # ---------------- support / tickets ----------------
@@ -1345,7 +1305,7 @@ async def cb_chat_start(call: CallbackQuery, state: FSMContext):
     m = pricing.MODELS.get(model_key)
     if m is None:
         await call.answer("Эта модель больше недоступна.", show_alert=True)
-        await call.message.edit_text(texts.CHAT_START_CATEGORY_MENU, reply_markup=kb.categories_kb("chat"))
+        await call.message.edit_text(texts.MODELS_CATEGORY_MENU, reply_markup=kb.categories_kb())
         return
     await state.set_state(ChatFlow.in_chat)
     await state.update_data(model_key=model_key)
@@ -1377,7 +1337,7 @@ async def _active_model_or_reset(message: Message, state: FSMContext, model_key:
     if m is None:
         await state.clear()
         await message.answer(
-            "⚠️ Эта модель больше недоступна в боте. Выбери другую в «💬 Начать чат».",
+            "⚠️ Эта модель больше недоступна в боте. Выбери другую в «🤖 Модели».",
             reply_markup=kb.main_reply_kb(is_admin=message.from_user.id in cfg.admin_ids),
         )
         return None

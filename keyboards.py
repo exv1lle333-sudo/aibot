@@ -9,17 +9,23 @@ from config import cfg
 # ---------------- persistent bottom (reply) menu ----------------
 # Текст этих кнопок = сами кнопки, поэтому вынесен в константы:
 # и клавиатура, и обработчики в handlers/user.py ссылаются на одни и те же значения.
+#
+# Упрощённая структура (5 пунктов вместо 9):
+#   🤖 Модели   — раньше было два отдельных раздела ("Начать чат" и "Покупка").
+#                 Теперь это одно дерево: категория → модель → карточка, а в карточке
+#                 сразу и "Начать диалог" (если уже есть токены), и пакеты на покупку —
+#                 не нужно заранее решать, зачем ты сюда зашёл.
+#   👤 Кабинет  — раньше было три раздела ("Профиль", "Баланс", "Промокод").
+#                 Теперь один экран: ID, баланс, токены по моделям, и кнопки
+#                 пополнения/истории/промокода/режима диалога под ним.
+#   🛟 Поддержка, 👥 Рефералы, 📢 Наш канал — без изменений.
 
-MAIN_BTN_CHAT = "💬 Начать чат"
-MAIN_BTN_PURCHASE = "🛒 Покупка"
-MAIN_BTN_PROFILE = "👤 Профиль"
-MAIN_BTN_BALANCE = "💰 Баланс"
-MAIN_BTN_PROMO = "🎁 Промокод"
+MAIN_BTN_MODELS = "🤖 Модели"
+MAIN_BTN_CABINET = "👤 Кабинет"
 MAIN_BTN_SUPPORT = "🛟 Поддержка"
 MAIN_BTN_REFERRAL = "👥 Рефералы"
 MAIN_BTN_CHANNEL = "📢 Наш канал"
 MAIN_BTN_ADMIN = "🛠 Админ-панель"
-MAIN_BTN_MODE = "⚙️ Режим"
 
 CHAT_BTN_CLEAR = "🧹 Очистить диалог"
 CHAT_BTN_BACK = "⬅️ В главное меню"
@@ -27,16 +33,12 @@ CHAT_BTN_BACK = "⬅️ В главное меню"
 
 def main_reply_kb(is_admin: bool = False) -> ReplyKeyboardMarkup:
     b = ReplyKeyboardBuilder()
-    b.button(text=MAIN_BTN_CHAT)
-    b.button(text=MAIN_BTN_PURCHASE)
-    b.button(text=MAIN_BTN_PROFILE)
-    b.button(text=MAIN_BTN_BALANCE)
-    b.button(text=MAIN_BTN_PROMO)
+    b.button(text=MAIN_BTN_MODELS)
+    b.button(text=MAIN_BTN_CABINET)
     b.button(text=MAIN_BTN_SUPPORT)
     b.button(text=MAIN_BTN_REFERRAL)
     b.button(text=MAIN_BTN_CHANNEL)
-    b.button(text=MAIN_BTN_MODE)
-    sizes = [2, 2, 2, 2, 1]
+    sizes = [2, 2, 1]
     if is_admin:
         b.button(text=MAIN_BTN_ADMIN)
         sizes.append(1)
@@ -52,6 +54,7 @@ def mode_kb(current_mode: str) -> InlineKeyboardMarkup:
     economy_mark = "✅ " if current_mode == "economy" else ""
     b.button(text=f"{normal_mark}💬 Обычный", callback_data="mode:set:normal")
     b.button(text=f"{economy_mark}⚡ Экономный", callback_data="mode:set:economy")
+    b.button(text="⬅️ В Кабинет", callback_data="menu:cabinet")
     b.adjust(1)
     return b.as_markup()
 
@@ -68,14 +71,12 @@ def chat_reply_kb() -> ReplyKeyboardMarkup:
 
 def main_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
-    b.button(text="👤 Профиль", callback_data="menu:profile")
-    b.button(text="💰 Баланс", callback_data="menu:balance")
-    b.button(text="🛒 Покупка", callback_data="models_list:buy")
-    b.button(text="🎁 Промокод", callback_data="menu:promo")
+    b.button(text="🤖 Модели", callback_data="models:categories")
+    b.button(text="👤 Кабинет", callback_data="menu:cabinet")
     b.button(text="🛟 Поддержка", callback_data="menu:support")
     b.button(text="👥 Рефералы", callback_data="menu:referral")
     b.button(text="📢 Наш канал", url=cfg.channel_url)
-    sizes = [2, 2, 2, 1]
+    sizes = [2, 2, 1]
     if is_admin:
         b.button(text="🛠 Админ-панель", callback_data="menu:admin")
         sizes.append(1)
@@ -89,55 +90,55 @@ def back_to_main() -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
-def balance_menu() -> InlineKeyboardMarkup:
+def cabinet_menu() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.button(text="➕ Пополнить баланс", callback_data="balance:topup")
     b.button(text="📜 История платежей", callback_data="balance:history")
+    b.button(text="🎁 Промокод", callback_data="menu:promo")
+    b.button(text="⚙️ Режим диалога", callback_data="menu:mode")
     b.button(text="⬅️ В главное меню", callback_data="menu:main")
-    b.adjust(1)
+    b.adjust(2, 2, 1)
     return b.as_markup()
 
 
 def pay_link_kb(url: str) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.button(text="💳 Оплатить", url=url)
-    b.button(text="⬅️ В главное меню", callback_data="menu:main")
+    b.button(text="⬅️ В Кабинет", callback_data="menu:cabinet")
     b.adjust(1)
     return b.as_markup()
 
 
-def categories_kb(mode: str) -> InlineKeyboardMarkup:
-    """mode: 'buy' — покупка токенов; 'chat' — начать диалог.
-    Первый шаг: выбор категории моделей (фото/Claude/Gemini/GPT/другие)."""
+def categories_kb() -> InlineKeyboardMarkup:
+    """Первый шаг: выбор категории моделей (фото/Claude/Gemini/GPT)."""
     b = InlineKeyboardBuilder()
     for cat in pricing.categories_with_models():
-        b.button(text=pricing.CATEGORY_TITLES[cat], callback_data=f"models_cat:{mode}:{cat}")
+        b.button(text=pricing.CATEGORY_TITLES[cat], callback_data=f"models_cat:{cat}")
     b.button(text="⬅️ В главное меню", callback_data="menu:main")
     b.adjust(1)
     return b.as_markup()
 
 
-def models_in_category_kb(mode: str, category: str) -> InlineKeyboardMarkup:
+def models_in_category_kb(category: str) -> InlineKeyboardMarkup:
     """Второй шаг: список моделей внутри выбранной категории."""
     b = InlineKeyboardBuilder()
     for key, m in pricing.models_in_category(category):
-        b.button(text=m.title, callback_data=f"model:{mode}:{key}")
-    b.button(text="⬅️ К категориям", callback_data=f"models_list:{mode}")
+        b.button(text=m.title, callback_data=f"model:{key}")
+    b.button(text="⬅️ К категориям", callback_data="models:categories")
     b.adjust(1)
     return b.as_markup()
 
 
-def model_card_kb(model_key: str, mode: str) -> InlineKeyboardMarkup:
-    """mode: 'buy' — показываем пакеты токенов на покупку; 'chat' — только кнопка начать диалог,
-    без возможности купить (её убрали из "Начать чат" по просьбе — покупка теперь только
-    через отдельный раздел "🛒 Покупка")."""
+def model_card_kb(model_key: str) -> InlineKeyboardMarkup:
+    """Карточка модели теперь всегда показывает и пакеты токенов на покупку, и кнопку
+    начать диалог сразу (если токены уже есть на кошельке — платить повторно не нужно) —
+    больше не нужно заранее выбирать между "чатом" и "покупкой"."""
     b = InlineKeyboardBuilder()
-    if mode == "buy":
-        for amount, price in pricing.list_packages(model_key):
-            b.button(text=f"{amount:,} ток. — {price} ₽".replace(",", " "), callback_data=f"buy:{model_key}:{amount}")
+    for amount, price in pricing.list_packages(model_key):
+        b.button(text=f"{amount:,} ток. — {price} ₽".replace(",", " "), callback_data=f"buy:{model_key}:{amount}")
     b.button(text="💬 Начать диалог", callback_data=f"chat:{model_key}")
     category = pricing.MODELS[model_key].category
-    b.button(text="⬅️ К моделям", callback_data=f"models_cat:{mode}:{category}")
+    b.button(text="⬅️ К моделям", callback_data=f"models_cat:{category}")
     b.adjust(1)
     return b.as_markup()
 
