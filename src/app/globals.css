@@ -1,0 +1,131 @@
+@import "tailwindcss";
+
+:root {
+  --tg-bg: var(--tg-theme-bg-color, #ffffff);
+  --tg-secondary-bg: var(--tg-theme-secondary-bg-color, #f0f2f5);
+  --tg-section-bg: var(--tg-theme-section-bg-color, #ffffff);
+  --tg-text: var(--tg-theme-text-color, #0f172a);
+  --tg-hint: var(--tg-theme-hint-color, #708499);
+  --tg-link: var(--tg-theme-link-color, #2481cc);
+  --tg-button: var(--tg-theme-button-color, #2481cc);
+  --tg-button-text: var(--tg-theme-button-text-color, #ffffff);
+  --tg-accent: var(--tg-theme-accent-text-color, #2481cc);
+  --tg-destructive: var(--tg-theme-destructive-text-color, #e53935);
+  --tg-separator: var(--tg-theme-section-separator-color, rgba(0, 0, 0, 0.08));
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --tg-bg: var(--tg-theme-bg-color, #18222d);
+    --tg-secondary-bg: var(--tg-theme-secondary-bg-color, #131b23);
+    --tg-section-bg: var(--tg-theme-section-bg-color, #18222d);
+    --tg-text: var(--tg-theme-text-color, #f5f5f5);
+    --tg-hint: var(--tg-theme-hint-color, #8b98a5);
+    --tg-separator: var(--tg-theme-section-separator-color, rgba(255, 255, 255, 0.08));
+  }
+}
+
+@theme inline {
+  --color-tg-bg: var(--tg-bg);
+  --color-tg-secondary: var(--tg-secondary-bg);
+  --color-tg-section: var(--tg-section-bg);
+  --color-tg-text: var(--tg-text);
+  --color-tg-hint: var(--tg-hint);
+  --color-tg-link: var(--tg-link);
+  --color-tg-button: var(--tg-button);
+  --color-tg-button-text: var(--tg-button-text);
+  --color-tg-accent: var(--tg-accent);
+  --color-tg-destructive: var(--tg-destructive);
+  --color-tg-separator: var(--tg-separator);
+}
+
+html,
+body {
+  height: 100%;
+  background: var(--tg-secondary-bg);
+  color: var(--tg-text);
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+* {
+  -webkit-touch-callout: none;
+}
+
+input,
+textarea,
+button {
+  font: inherit;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  scrollbar-width: none;
+}
+
+/* Сообщения модели */
+.msg-content p {
+  margin: 0 0 0.5em;
+}
+.msg-content p:last-child {
+  margin-bottom: 0;
+}
+.msg-content pre {
+  background: rgba(0, 0, 0, 0.08);
+  border-radius: 10px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  font-size: 12.5px;
+  line-height: 1.45;
+  margin: 0.5em 0;
+}
+@media (prefers-color-scheme: dark) {
+  .msg-content pre {
+    background: rgba(255, 255, 255, 0.08);
+  }
+}
+.msg-content code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.92em;
+}
+.msg-content :not(pre) > code {
+  background: rgba(0, 0, 0, 0.07);
+  padding: 1px 5px;
+  border-radius: 5px;
+}
+.msg-content ul {
+  padding-left: 1.2em;
+  margin: 0.3em 0;
+  list-style: disc;
+}
+.msg-content ol {
+  padding-left: 1.2em;
+  margin: 0.3em 0;
+  list-style: decimal;
+}
+.msg-content b,
+.msg-content strong {
+  font-weight: 600;
+}
+
+@keyframes dots {
+  0%, 20% { opacity: 0.2; }
+  50% { opacity: 1; }
+  100% { opacity: 0.2; }
+}
+.dot { animation: dots 1.2s infinite; }
+.dot:nth-child(2) { animation-delay: 0.2s; }
+.dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes slideUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+.sheet-enter { animation: slideUp 0.22s ease-out; }
